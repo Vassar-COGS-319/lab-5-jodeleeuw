@@ -5,11 +5,11 @@ library(ggplot2)
 # your job is to implement the reinforcement learning model
 
 # experiment parameters
-n.subjects <- 30 # how many simulated subjects to include
+n.subjects <- 60 # how many simulated subjects to include
 n.trials <- 30 # how many trials will each subject complete
 prob.reward.A <- 0.8 # the probability of a positive reward for chosing option A
 prob.reward.B <- 0.2 # the probability of a positive reward for chosing option B
-reward.value <- -1 # the value of a positive reward
+reward.value <- 1 # the value of a positive reward
 
 # model parameters
 alpha <- 0.1 # controls the learning rate of the model
@@ -40,14 +40,14 @@ softmax.rule(a.value=10, b.value=1, temperature=5) # should be 0.858
 run.one.subject <- function(){
   
   choices.history <- c() # please make sure that the values added to this are either 'a' or 'b'
-  prob.a.history <- c()
+  reward.prediction.error.history <- c()
   
   q.a <- 0
   q.b <- 0
   
   for(i in 1:n.trials){
     probability.of.a <- softmax.rule(q.a, q.b, temperature)
-    prob.a.history <- c(prob.a.history, probability.of.a)
+    
     choice <- sample(c('a','b'), size=1, prob = c(probability.of.a, 1-probability.of.a))
     choices.history <- c(choices.history, choice)
     if(choice == 'a'){
@@ -60,9 +60,10 @@ run.one.subject <- function(){
       diff <- reward - q.b
       q.b <- q.b + alpha*diff
     }
+    reward.prediction.error.history <- c(reward.prediction.error.history, diff)
   }
   
-  return(data.frame(trial=1:n.trials, choice=choices.history, probability=prob.a.history))
+  return(data.frame(trial=1:n.trials, choice=choices.history, reward.prediction.error=reward.prediction.error.history))
 }
 
 # if you've implemented the model above correctly, then running this block of code with the
@@ -77,6 +78,7 @@ test.run.data <- run.one.subject()
 experiment.data <- NA # create variable to hold data.
 for(s in 1:n.subjects){ # loop through each subject
   subject.data <- run.one.subject() # run the subject with a fresh model
+  subject.data$subject <- s # NEED TO ADD THIS TO THE MODEL FOR RPE, SO WE CAN PLOT INDIVIDUAL SUBJECT ERRORS
   if(is.na(experiment.data)){ # if there is no data yet...
     experiment.data <- subject.data # ... then make this subject's data the experiment.data
   } else { # otherwise...
@@ -88,43 +90,17 @@ for(s in 1:n.subjects){ # loop through each subject
 # and to calculate the mean probability of selecting 'a' according to the model.
 summarized.data <- experiment.data %>%
   group_by(trial) %>%
-  summarize(choice_pct = sum(choice=="a")/n(), prob_mean = mean(probability))
+  summarize(choice_pct = sum(choice=="a")/n(), rpe_mean = mean(reward.prediction.error))
 
 # this code uses the ggplot2 library to make a plot similar to Figure 1 in the Pessiglione et al. (2006) paper.
 ggplot(summarized.data, aes(x=trial, y=choice_pct))+
-  geom_point()+
-  geom_line(aes(y=prob_mean))+
-  ylim(c(0,1))+
-  labs(x="Trial Number", y="Modelled choices (%)")+
+  geom_line(data=experiment.data %>% filter(subject %in% 1:5), aes(x=trial, y=reward.prediction.error,group=factor(subject)), color="grey50")+
+  geom_line(aes(y=rpe_mean), color="red", size=2)+
+  ylim(c(-1,1))+
+  labs(x="Trial Number", y="Reward Prediction Error")+
   theme_bw()
 
 # QUESTIONS ####
-
-# 1. Try running the model with different values for alpha and temperature. What is the effect of each parameter
-#    on the final figure that is produced? Explain why these effects happen.
-
-# ALPHA: If alpha is very high (say 0.8), then the model's behavior is more unstable (the line becomes more jagged).
-#        This is because the model becomes overly responsive to whatever the most recent prediction error was, and
-#        overcorrects for a rare event. If alpha is very low (0.01) the model's predictions are very stable, but the
-#        model changes preference very slowly and the line has a small slope.
-
-# TEMPERATURE: (Using alpha = 0.1 for these simulations.) When temperature is very low, the initial choice of the model
-#              matters a LOT. If option B is selected and it happens to be a case where option B gets reward, then the
-#              model will persist in choosing option B because its small expected reward is better than the reward of 0
-#              for option A. This shows up in the average group data as plateau in the % of choices that are A. Some
-#              subjects are just choosing B over and over because it was the first thing that was rewarded. 
-#              Note that setting temperature too low (e.g., 0.001) creates problems because the numbers
-#              get too large for the computer to represent and it resorts to "Inf" meaning positive infinity.
-
-# 2. Pessiglione et al. also included a condition where the reward was negative instead of positive. They plot
-#    the results as squares in Figure 1. Simulate this data. Can you match the general result? Why is the probability
-#    curve in both Figure 1 and your simulation less smooth for this simulation than when the reward is positive?
-
-# Parameters: Set reward value = -1, temperature = 0.08 (or somewhere around here). This shows a curve that looks pretty
-# similar to the paper. The curve is bumpier than the positive reward because there are many fewer choices where the model
-# selects the A option, because it is more likely to produce a negative reward. Therefore there's just less data to smooth
-# the average. You can amplify this further by decreasing the number of subjects, since the original paper had fewer subjects
-# than the 60 used above.
 
 # 3. CHALLENGE (If you completed the rest of the lab relatively quickly, do this problem. If it took you plenty of
 #    effort to complete the model, you can choose whether to pursue this problem or not.): 
@@ -133,4 +109,8 @@ ggplot(summarized.data, aes(x=trial, y=choice_pct))+
 #    the average reward prediction error for the 30 trials. Explain the shape of the graph. You may want to copy-and-paste
 #    the model code into a new file to do this.
 
-# SEE rpe-model.R
+# In the plot above, I'm showing the average reward prediction error (red line) and also the RPE for individual subjects.
+# Note that the average RPE goes down steadily over the course of the experiment, but individuals show a lot of jumps in
+# their RPE. This is because a reward of 0 occurs 20% of the time with option A, and yet the optimal strategy is to pick
+# option A every time. So there will be periodic spikes in RPE. This signal is what the authors used to find brain
+# regions that correlated with changes in RPE.
